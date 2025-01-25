@@ -250,7 +250,8 @@ for i in file_list:
     now_file = os.path.join(config_dir, i)
     build_csv_config(now_file, i, 0, 0)
     index += 1
-
+import time
+start_time = time.time()
 talk_file_list = os.listdir(talk_dir)
 for i in talk_file_list:
     # 跳过ai文件夹
@@ -262,7 +263,10 @@ for i in talk_file_list:
         # config_def_str += "\n\n\n"
         now_f = os.path.join(now_dir, f)
         build_csv_config(now_f, f, 1, 0)
+end_time = time.time()
+total_time = end_time - start_time
 
+print(f"The for loop ran in {total_time:.4f} seconds.")
 target_file_list = os.listdir(target_dir)
 for i in target_file_list:
     now_dir = os.path.join(target_dir, i)
