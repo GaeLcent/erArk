@@ -3,6 +3,8 @@ import os
 import json
 import datetime
 import ast
+import time
+
 
 config_dir = os.path.join("data", "csv")
 event_dir = os.path.join("data", "event")
@@ -12,127 +14,142 @@ config_data = {}
 config_def_str = ""
 msgData = set()
 class_data = set()
-character_dir = os.path.join("data","character")
+character_dir = os.path.join("data", "character")
 character_data = {}
 ui_text_dir = os.path.join("data", "ui_text")
 ui_text_data = {}
-po_csv_path = os.path.join("data","po","zh_CN","LC_MESSAGES", "erArk_csv.po")
-po_talk_path = os.path.join("data","po","zh_CN","LC_MESSAGES", "erArk_talk.po")
+po_csv_path = os.path.join("data", "po", "zh_CN", "LC_MESSAGES", "erArk_csv.po")
+po_talk_path = os.path.join("data", "po", "zh_CN", "LC_MESSAGES", "erArk_talk.po")
 config_po, talk_po = "", ""
 built = []
 
+def timeit(func):
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        print(f"Function {func.__name__} executed in {end_time - start_time:.4f} seconds")
+        return result
+    return wrapper
+
+
 def build_csv_config(file_path: str, file_name: str, talk: bool, target: bool):
+    global config_data, config_def_str, msgData, class_data, character_data, ui_text_data, config_po, talk_po, built
+
     with open(file_path, encoding="utf-8") as now_file:
         now_read = csv.DictReader(now_file)
         now_docstring_data = {}
         now_type_data = {}
         get_text_data = {}
         file_id = file_name.split(".")[0]
+        
         if talk or target:
             path_list = file_path.split(os.sep)
             if talk:
                 file_id = path_list[-2] + "_" + file_id
+        
         i = 0
         class_text = ""
         type_text = file_id
+        
         if talk:
             type_text = "Talk"
             if "premise" in file_name:
                 type_text = "TalkPremise"
-        if target:
+        elif target:
             if "target" in file_name:
                 type_text = "Target"
             elif "premise" in file_name:
                 type_text = "TargetPremise"
             elif "effect" in file_name:
                 type_text = "TargetEffect"
+        
         config_data.setdefault(type_text, {})
         config_data[type_text].setdefault("data", [])
         config_data[type_text].setdefault("gettext", {})
-        for row in now_read:
-            # 获得当前的行数
-            now_index = now_read.line_num
+
+        rows = list(now_read)  # Read all rows at once to avoid multiple file reads
+
+        for j, row in enumerate(rows):
+            # Get the current line number
+            now_index = j + 2  # CSV reader starts counting from 1, so add 1 more for header lines
             if not i:
-                for k in row:
-                    now_docstring_data[k] = row[k]
+                now_docstring_data.update(row)
                 i += 1
                 continue
             elif i == 1:
-                for k in row:
-                    now_type_data[k] = row[k]
+                now_type_data.update(row)
                 i += 1
                 continue
             elif i == 2:
-                for k in row:
-                    get_text_data[k] = int(row[k])
+                get_text_data.update({k: int(v) for k, v in row.items()})
                 i += 1
                 continue
             elif i == 3:
                 class_text = list(row.values())[0]
                 i += 1
                 continue
-            for k in now_type_data:
-                now_type = now_type_data[k]
-                # print(f"debug row = {row}")
-                if not len(row[k]):
-                    del row[k]
+            
+            processed_row = {}
+            for k, val in row.items():
+                if not val:
                     continue
+                now_type = now_type_data[k]
                 if now_type == "int":
-                    row[k] = int(row[k])
+                    processed_row[k] = int(val)
                 elif now_type == "str":
-                    row[k] = str(row[k]).replace('"','\\"') # 转义引号防止造成po文件混乱
+                    processed_row[k] = str(val).replace('"', '\\"')  # Escape quotes to prevent issues in po files
                 elif now_type == "bool":
-                    row[k] = int(row[k])
+                    processed_row[k] = int(val)
                 elif now_type == "float":
-                    row[k] = float(row[k])
+                    processed_row[k] = float(val)
+                
                 if k == "cid" and talk:
-                    row[k] = file_id + row[k]
+                    processed_row[k] = file_id + val
                 if k == "talk_id" and talk:
-                    row[k] = file_id.split("-")[0] + row[k]
+                    processed_row[k] = file_id.split("-")[0] + val
                 if k == "cid" and target:
-                    row[k] = path_list[-2] + row[k]
+                    processed_row[k] = path_list[-2] + val
                 elif k == "target_id" and target:
-                    row[k] = path_list[-2] + row[k]
-                if get_text_data[k]:
-                    build_config_po(row[k], file_path, now_index, talk)
-            config_data[type_text]["data"].append(row)
+                    processed_row[k] = path_list[-2] + val
+                
+                if get_text_data.get(k):
+                    build_config_po(val, file_path, now_index, talk)
+            
+            config_data[type_text]["data"].append(processed_row)
+        
         config_data[type_text]["gettext"] = get_text_data
         build_config_def(type_text, now_type_data, now_docstring_data, class_text)
 
 
 def build_config_def(class_name: str, value_type: dict, docstring: dict, class_text: str):
-    global config_def_str
+    global config_def_str, class_data
     if class_name not in class_data:
         # 给talk补上一个头部空行
         if class_name == "Talk":
             config_def_str += "\n\n"
-        config_def_str += "class " + class_name + ":"
-        config_def_str += '\n    """ ' + class_text + ' """\n'
-        for k in value_type:
-            config_def_str += "\n    " + k + ": " + value_type[k] + "\n"
-            config_def_str += "    " + '""" ' + docstring[k] + ' """'
+        config_def_str += f"class {class_name}:"
+        config_def_str += f'\n    """{class_text}"""\n'
+        for k, v in value_type.items():
+            config_def_str += f"\n    {k}: {v}"
+            config_def_str += f'\n    """{docstring[k]}"""'
         class_data.add(class_name)
     # 去掉因为talk的csv文件而多出的尾部空行
     else:
-        count_flag = 0
-        for i in range(3):
-            if config_def_str[-i] == "\n":
-                count_flag += 1
-        if count_flag >= 2:
-            config_def_str = config_def_str[:-2]
+        while config_def_str.endswith('\n'):
+            config_def_str = config_def_str[:-1]
+        if config_def_str.endswith('\n'):
+            config_def_str = config_def_str[:-1]
 
 
 def build_config_po(message: str, file_path: str, now_index: int, talk: bool = False):
-    global config_po, talk_po,built
-    if not message in built:
+    global config_po, talk_po, built
+    if message not in built:
+        po_entry = f'#: .\\{file_path}:{now_index}\nmsgid "{message}"\nmsgstr ""\n\n'
         if talk:
-            talk_po += f"#: .\{file_path}:{now_index}\n"
-            talk_po += f'msgid "{message}"\n'
-            talk_po += 'msgstr ""\n\n'
+            talk_po += po_entry
         else:
-            config_po += f"#: .\{file_path}:{now_index}\n"
-            config_po += f'msgid "{message}"\n'
-            config_po += f'msgstr ""\n\n'
+            config_po += po_entry
         built.append(message)
 
 
@@ -252,6 +269,7 @@ for i in file_list:
     index += 1
 
 talk_file_list = os.listdir(talk_dir)
+start_time = time.time()
 for i in talk_file_list:
     # 跳过ai文件夹
     if i == "ai":
@@ -262,6 +280,11 @@ for i in talk_file_list:
         # config_def_str += "\n\n\n"
         now_f = os.path.join(now_dir, f)
         build_csv_config(now_f, f, 1, 0)
+
+end_time = time.time()
+total_time = end_time - start_time
+
+print(f"The for loop ran in {total_time:.4f} seconds.")
 
 target_file_list = os.listdir(target_dir)
 for i in target_file_list:
