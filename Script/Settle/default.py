@@ -10070,7 +10070,8 @@ def handle_penis_in_t_vagina(
         return
     character_data: game_type.Character = cache.character_data[character_id]
     target_data: game_type.Character = cache.character_data[character_data.target_character_id]
-    target_data.h_state.insert_position = 6
+    if target_data.h_state.insert_position != 7:
+        target_data.h_state.insert_position = 6
 
 
 @settle_behavior.add_settle_behavior_effect(constant_effect.BehaviorEffect.PENIS_IN_T_WOMB)
